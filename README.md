@@ -1,6 +1,6 @@
 My alterations: using PyTorch instead of Keras, and integrating LLM answering.
 
-The following is a copy-paste from the previous paper's instructions:
+# The following is a copy-paste from the previous paper's instructions:
 
 This code learns reward functions from human preferences in various tasks by actively generating batches of scenarios and querying a human expert.
 
