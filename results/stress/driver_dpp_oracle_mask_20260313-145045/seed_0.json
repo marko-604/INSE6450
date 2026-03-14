@@ -1,0 +1,56 @@
+{
+  "task": "driver",
+  "method": "dpp",
+  "history": [
+    {
+      "iteration": 1,
+      "num_queries": 10,
+      "oracle_queries": 10,
+      "elapsed_sec": 11.90299916267395,
+      "alignment": 0.4945436607949853,
+      "avg_log_likelihood": -0.6807995286204747
+    },
+    {
+      "iteration": 2,
+      "num_queries": 20,
+      "oracle_queries": 20,
+      "elapsed_sec": 24.689654111862183,
+      "alignment": 0.3820622364285115,
+      "avg_log_likelihood": -0.5355866644288804
+    },
+    {
+      "iteration": 3,
+      "num_queries": 30,
+      "oracle_queries": 30,
+      "elapsed_sec": 37.47414183616638,
+      "alignment": 0.734720395120159,
+      "avg_log_likelihood": -0.566271837150066
+    },
+    {
+      "iteration": 4,
+      "num_queries": 40,
+      "oracle_queries": 40,
+      "elapsed_sec": 49.76778817176819,
+      "alignment": 0.8192412477016807,
+      "avg_log_likelihood": -0.6082568265769487
+    },
+    {
+      "iteration": 5,
+      "num_queries": 50,
+      "oracle_queries": 50,
+      "elapsed_sec": 62.141310930252075,
+      "alignment": 0.9449614635685024,
+      "avg_log_likelihood": -0.6302077876509117
+    },
+    {
+      "iteration": 6,
+      "num_queries": 60,
+      "oracle_queries": 60,
+      "elapsed_sec": 73.20906019210815,
+      "alignment": 0.9546506386598844,
+      "avg_log_likelihood": -0.6417456367941281
+    }
+  ],
+  "oracle_queries": 60,
+  "llm_queries": 0
+}

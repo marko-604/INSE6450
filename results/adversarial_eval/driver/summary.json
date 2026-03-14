@@ -1,0 +1,42 @@
+{
+  "task": "driver",
+  "w_hat": [
+    0.35,
+    0.1,
+    0.3,
+    -0.7
+  ],
+  "num_eval_pairs": 500,
+  "results": [
+    {
+      "epsilon": 0.0,
+      "robust_accuracy": 1.0,
+      "avg_log_likelihood": -0.6084983514736355,
+      "mean_confidence": 0.545282537423304
+    },
+    {
+      "epsilon": 0.02,
+      "robust_accuracy": 0.874,
+      "avg_log_likelihood": -0.6217889794291613,
+      "mean_confidence": 0.5390411570059028
+    },
+    {
+      "epsilon": 0.05,
+      "robust_accuracy": 0.726,
+      "avg_log_likelihood": -0.6421149769081369,
+      "mean_confidence": 0.5325467203622535
+    },
+    {
+      "epsilon": 0.1,
+      "robust_accuracy": 0.504,
+      "avg_log_likelihood": -0.6770347663927302,
+      "mean_confidence": 0.5287829025297558
+    },
+    {
+      "epsilon": 0.2,
+      "robust_accuracy": 0.234,
+      "avg_log_likelihood": -0.7507940856871799,
+      "mean_confidence": 0.5395413840972758
+    }
+  ]
+}
