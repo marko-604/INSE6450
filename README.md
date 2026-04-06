@@ -1,5 +1,15 @@
 My alterations: using PyTorch instead of Keras, and integrating LLM answering.
 
+
+How to run: 
+
+1. python input_sampler_2.py driver  1000
+2. python run.py driver dpp 50 1000 10 5
+3. 50 - queries , 1000 - samples, 10 - batch size , 5 - LLM queries per batch
+4. Model performance details will be output in console, and learning output will be in a file with similar format in results: driver_dpp_topk5_20260402-124302-786.json
+5. python plot_results.py .\results\SAMPLEFILE_123.json
+
+
 # The following is a copy-paste from the previous paper's instructions:
 
 This code learns reward functions from human preferences in various tasks by actively generating batches of scenarios and querying a human expert.
