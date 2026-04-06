@@ -49,10 +49,25 @@ def infer_tag_from_filename(fname: str) -> Optional[str]:
 
 def infer_group_key(data: dict, path: str) -> GroupKey:
     """
-    Prefer JSON metadata (best practice). Fall back to filename parsing.
+    Prefer JSON metadata. Fall back to filename parsing.
+
+    Supported filename patterns:
+      <task>_<method>_<tag>_<timestamp>.json
+      <task>_<method>_<tag>.json
+
+    Examples:
+      driver_dpp_topk10_20260311-153638-717.json
+      tosser_greedy_topk1_20260309-162444-458.json
     """
-    task = str(data.get("task", "unknown")).lower()
-    method = str(data.get("method", "unknown")).lower()
+    fname = os.path.splitext(os.path.basename(path))[0]
+    parts = fname.split("_")
+
+    file_task = parts[0].lower() if len(parts) >= 1 else "unknown"
+    file_method = parts[1].lower() if len(parts) >= 2 else "unknown"
+    file_tag = parts[2].lower() if len(parts) >= 3 else "unknown"
+
+    task = str(data.get("task") or file_task).lower()
+    method = str(data.get("method") or file_method).lower()
 
     pure_oracle = bool(data.get("pure_oracle", False))
     human_topk = data.get("human_topk", None)
@@ -62,8 +77,7 @@ def infer_group_key(data: dict, path: str) -> GroupKey:
     elif human_topk is not None:
         tag = f"topk{int(human_topk)}"
     else:
-        # fallback to filename
-        tag = infer_tag_from_filename(os.path.basename(path)) or "unknown"
+        tag = infer_tag_from_filename(os.path.basename(path)) or file_tag
 
     return GroupKey(task=task, method=method, tag=tag)
 
@@ -254,11 +268,10 @@ def plot_groups(avg_results: Dict[GroupKey, dict], out_dir: str, metric: str) ->
             )
             ylabel = "Avg Log-Likelihood"
 
-        label = f"{key.method} {key.tag}"
+        label = f"{key.task} {key.method} {key.tag}"
         plt.plot(xs, ys, label=label)
         plt.fill_between(xs, ys - ss, ys + ss, alpha=0.2)
 
-    # label x-axis based on the first result's mode (they should all match)
     first = next(iter(avg_results.values()))
     plt.xlabel("Oracle queries" if first.get("x_mode") == "oracle" else "Queries")
     plt.ylabel(ylabel)
@@ -312,7 +325,6 @@ def collect_json_files(args) -> List[str]:
             elif os.path.isdir(item):
                 add_dir(item)
             else:
-                # treat as glob
                 matches = glob.glob(item, recursive=True)
                 for m in matches:
                     if os.path.isfile(m):
@@ -322,7 +334,6 @@ def collect_json_files(args) -> List[str]:
     else:
         add_dir(args.results_dir)
 
-    # de-dupe while preserving order
     seen = set()
     deduped: List[str] = []
     for p in out:
@@ -347,7 +358,7 @@ def main():
                           "  --inputs 'results/context/**/*.json'\n"
                           "If omitted, the script walks --results_dir like before."))
     ap.add_argument("--x", default="oracle", choices=["oracle", "all"], help="X-axis mode.")
-    ap.add_argument("--pattern", default="driver_", help="Only include files whose name contains this substring.")
+    ap.add_argument("--pattern", default=None, help="Only include files whose name contains this substring. Defaults to no filename filter.")
     ap.add_argument("--out_dir", default=os.path.join("results", "averaged_context"), help="Output folder for averaged JSONs/plots.")
     ap.add_argument("--plot", action="store_true", help="Also generate mean+std plots.")
     args = ap.parse_args()
@@ -357,14 +368,12 @@ def main():
         searched = args.inputs if args.inputs else [args.results_dir]
         raise SystemExit(f"No JSON files found in {searched} matching pattern '{args.pattern}'.")
 
-    # group by (task, method, tag)
     groups: Dict[GroupKey, List[str]] = defaultdict(list)
     for p in all_files:
         data = load_json(p)
         key = infer_group_key(data, p)
         groups[key].append(p)
 
-    # average each group
     averaged: Dict[GroupKey, dict] = {}
     for key, paths in sorted(groups.items(), key=lambda kv: (kv[0].task, kv[0].method, kv[0].tag)):
         if len(paths) < 2:

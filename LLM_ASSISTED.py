@@ -1,7 +1,8 @@
 import requests
 import numpy as np
 
-from models import Driver
+from models import Driver, Tosser, Swimmer
+from driver_extra_feature import EXTRA_FEATURE_BANK
 from simulation_utils import get_feedback as human_get_feedback
 
 
@@ -11,47 +12,126 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "mistral"
 
 
-# Rolling history (normally would grow, but we will freeze baseline + stop logging after that)
 DRIVER_HISTORY = []
-
-# Frozen baseline history (only this is used for LLM prompt context after it exists)
 BASELINE_HISTORY = []
-
-
-
-
-
-
 def reset_driver_history():
     DRIVER_HISTORY.clear()
-
-
 def clear_baseline_history():
     BASELINE_HISTORY.clear()
-
-
 def freeze_baseline_from_current_history():
     BASELINE_HISTORY.clear()
     BASELINE_HISTORY.extend(DRIVER_HISTORY)
 
 
+SWIMMER_HISTORY = []
+SWIMMER_BASELINE_HISTORY = []
+
+def reset_swimmer_history():
+    SWIMMER_HISTORY.clear()
+
+def clear_swimmer_baseline_history():
+    SWIMMER_BASELINE_HISTORY.clear()
+
+def freeze_swimmer_baseline_from_current_history():
+    SWIMMER_BASELINE_HISTORY.clear()
+    SWIMMER_BASELINE_HISTORY.extend(SWIMMER_HISTORY)
+
+
+
+TOSSER_HISTORY = []
+TOSSER_BASELINE_HISTORY = []
+def reset_tosser_history():
+    TOSSER_HISTORY.clear()
+def clear_tosser_baseline_history():
+    TOSSER_BASELINE_HISTORY.clear()
+def freeze_tosser_baseline_from_current_history():
+    TOSSER_BASELINE_HISTORY.clear()
+    TOSSER_BASELINE_HISTORY.extend(TOSSER_HISTORY)
+
+
+
 # -----------------------------
 # Helpers: feature description
 # -----------------------------
-def describe_driver_features(phi):
+def describe_tosser_features(phi):
     """
-    Default driver is 4D: [lane_center, collision_avoid, road_pref, speed]
-    If extended to 5D, last dimension is "extra feature".
+    Tosser is 4D (from Tosser.get_features):
+      0) horizontal_range (higher is better)
+      1) maximum_altitude (higher is better)
+      2) num_of_flips (higher is better)
+      3) dist_to_basket (higher is better; it's exp(-3*distance))
     """
     phi = np.asarray(phi, dtype=float).reshape(-1)
     lines = []
     if phi.shape[0] >= 4:
-        lines.append(f"- Lane Centering: {phi[0]:.3f}")
-        lines.append(f"- Collision Avoidance: {phi[1]:.3f}")
-        lines.append(f"- Road Preference: {phi[2]:.3f}")
-        lines.append(f"- Speed: {phi[3]:.3f}")
-    if phi.shape[0] >= 5:
-        lines.append(f"- Extra Feature: {phi[4]:.3f}")
+        lines.append(f"- Horizontal Range: {phi[0]:.3f}")
+        lines.append(f"- Maximum Altitude: {phi[1]:.3f}")
+        lines.append(f"- Number of Flips: {phi[2]:.3f}")
+        lines.append(f"- Basket Proximity Score: {phi[3]:.3f}")
+    return "\n".join(lines)
+
+def _log_tosser_choice(phi_A, phi_B, s, source="llm"):
+    phi_A = np.asarray(phi_A, dtype=float).reshape(-1)
+    phi_B = np.asarray(phi_B, dtype=float).reshape(-1)
+    psi = (phi_A - phi_B).reshape(-1)
+
+    TOSSER_HISTORY.append(
+        {"phi_A": phi_A.tolist(), "phi_B": phi_B.tolist(), "psi": psi.tolist(), "s": int(s), "source": source}
+    )
+
+def _recent_tosser_history_for_prompt(max_items: int = 6) -> str:
+    history_src = TOSSER_BASELINE_HISTORY if TOSSER_BASELINE_HISTORY else TOSSER_HISTORY
+    if not history_src:
+        return "No previous comparisons yet."
+
+    hist = history_src[-max_items:]
+    lines = []
+    start_idx = max(1, len(history_src) - max_items + 1)
+
+    for i, entry in enumerate(hist, start=start_idx):
+        phi_A = entry.get("phi_A")
+        phi_B = entry.get("phi_B")
+        s = entry.get("s", 0)
+
+        if s == 1:
+            decision = "Oracle preferred Trajectory A."
+        elif s == -1:
+            decision = "Oracle preferred Trajectory B."
+        else:
+            decision = "Oracle had no preference (tie)."
+
+        if phi_A is None or phi_B is None:
+            continue
+
+        desc_A = describe_tosser_features(phi_A)
+        desc_B = describe_tosser_features(phi_B)
+
+        lines.append(
+            f"[Past comparison {i}]\n"
+            f"Trajectory A:\n{desc_A}\n\n"
+            f"Trajectory B:\n{desc_B}\n"
+            f"Decision: {decision}\n"
+        )
+
+    return "\n---\n".join(lines) if lines else "No feature history available."
+
+
+def describe_driver_features(phi):
+    """
+    Driver base is now 3D:
+      0) staying in lane
+      1) heading straightness
+      2) collision avoidance cost
+    If extended to 4D, the last value is the currently active extra feature.
+    """
+    phi = np.asarray(phi, dtype=float).reshape(-1)
+    lines = []
+    if phi.shape[0] >= 3:
+        lines.append(f"- Staying In Lane: {phi[0]:.3f}")
+        lines.append(f"- Heading Straightness: {phi[1]:.3f}")
+        lines.append(f"- Collision Avoidance Cost: {phi[2]:.3f}")
+    if phi.shape[0] >= 4:
+        lines.append(f"- Active Extra Feature: {phi[3]:.3f}")
     return "\n".join(lines)
 
 
@@ -112,6 +192,202 @@ def _recent_feature_history_for_prompt(max_items: int = 6) -> str:
         )
 
     return "\n---\n".join(lines) if lines else "No feature history available."
+
+def _recent_driver_history_all_for_prompt(max_items: int = 8) -> str:
+    if not DRIVER_HISTORY:
+        return "No previous comparisons yet."
+
+    hist = DRIVER_HISTORY[-max_items:]
+    lines = []
+    start_idx = max(1, len(DRIVER_HISTORY) - max_items + 1)
+
+    for i, entry in enumerate(hist, start=start_idx):
+        phi_A = entry.get("phi_A")
+        phi_B = entry.get("phi_B")
+        s = entry.get("s", 0)
+        source = entry.get("source", "unknown")
+
+        if s == 1:
+            decision = f"{source.upper()} preferred Trajectory A."
+        elif s == -1:
+            decision = f"{source.upper()} preferred Trajectory B."
+        else:
+            decision = f"{source.upper()} had no preference (tie)."
+
+        if phi_A is None or phi_B is None:
+            continue
+
+        desc_A = describe_driver_features(phi_A)
+        desc_B = describe_driver_features(phi_B)
+
+        lines.append(
+            f"[Recent comparison {i}]\n"
+            f"Trajectory A:\n{desc_A}\n\n"
+            f"Trajectory B:\n{desc_B}\n"
+            f"Decision: {decision}\n"
+        )
+
+    return "\n---\n".join(lines) if lines else "No feature history available."
+
+
+def llm_choose_driver_extra_feature(simulation_object) -> str:
+    current_feature = getattr(simulation_object, "extra_feature_id", "none")
+    history_str = _recent_driver_history_all_for_prompt(max_items=8)
+
+    options = []
+    for feature_id, meta in EXTRA_FEATURE_BANK.items():
+        if feature_id == "none":
+            continue
+        options.append(f"- {feature_id}: {meta['description']}")
+
+    prompt = f"""
+You are deciding whether the driver reward model is missing one important extra feature.
+
+Fixed driver features already present:
+1. Staying in lane (higher is better).
+2. Heading straightness (higher is better).
+3. Collision avoidance cost (lower is better).
+
+Current active extra feature: {current_feature}
+
+Candidate extra features:
+{chr(10).join(options)}
+
+Recent preference evidence:
+{history_str}
+
+Choose exactly one feature id from the candidate list above if one extra feature should be active.
+If none of them seems necessary right now, answer exactly: none
+
+Return exactly one token: the feature id only.
+"""
+
+    try:
+        raw = call_ollama_mistral(prompt).strip().lower()
+    except Exception as e:
+        print(f"[WARN] LLM feature-selection call failed ({type(e).__name__}): {e} -> keeping current feature")
+        return current_feature
+
+    if raw == "none":
+        return "none"
+    if raw in EXTRA_FEATURE_BANK and raw != "none":
+        return raw
+
+    print(f"[WARN] LLM returned unknown feature '{raw}', keeping current feature '{current_feature}'.")
+    return current_feature
+
+
+def describe_swimmer_features(phi):
+    """
+    Swimmer is 3D (from simulation_utils.create_env comments):
+      0) horizontal_range     (higher is better)
+      1) vertical_range       (closer to zero is better / mostly irrelevant)
+      2) total_displacement   (lower is better; avoid wasted motion)
+    """
+    phi = np.asarray(phi, dtype=float).reshape(-1)
+    lines = []
+    if phi.shape[0] >= 3:
+        lines.append(f"- Forward Progress: {phi[0]:.3f}")
+        lines.append(f"- Vertical Drift: {phi[1]:.3f}")
+        lines.append(f"- Total Displacement / Effort: {phi[2]:.3f}")
+    return "\n".join(lines)
+
+
+def _log_swimmer_choice(phi_A, phi_B, s, source="llm"):
+    phi_A = np.asarray(phi_A, dtype=float).reshape(-1)
+    phi_B = np.asarray(phi_B, dtype=float).reshape(-1)
+    psi = (phi_A - phi_B).reshape(-1)
+
+    SWIMMER_HISTORY.append(
+        {"phi_A": phi_A.tolist(), "phi_B": phi_B.tolist(), "psi": psi.tolist(), "s": int(s), "source": source}
+    )
+
+
+def _recent_swimmer_history_for_prompt(max_items: int = 6) -> str:
+    history_src = SWIMMER_BASELINE_HISTORY if SWIMMER_BASELINE_HISTORY else SWIMMER_HISTORY
+    if not history_src:
+        return "No previous comparisons yet."
+
+    hist = history_src[-max_items:]
+    lines = []
+    start_idx = max(1, len(history_src) - max_items + 1)
+
+    for i, entry in enumerate(hist, start=start_idx):
+        phi_A = entry.get("phi_A")
+        phi_B = entry.get("phi_B")
+        s = entry.get("s", 0)
+
+        if s == 1:
+            decision = "Oracle preferred Trajectory A."
+        elif s == -1:
+            decision = "Oracle preferred Trajectory B."
+        else:
+            decision = "Oracle had no preference (tie)."
+
+        if phi_A is None or phi_B is None:
+            continue
+
+        desc_A = describe_swimmer_features(phi_A)
+        desc_B = describe_swimmer_features(phi_B)
+
+        lines.append(
+            f"[Past comparison {i}]\n"
+            f"Trajectory A:\n{desc_A}\n\n"
+            f"Trajectory B:\n{desc_B}\n"
+            f"Decision: {decision}\n"
+        )
+
+    return "\n---\n".join(lines) if lines else "No feature history available."
+
+def llm_preference_for_swimmer(simulation_object, input_A, input_B):
+    simulation_object.feed(input_A)
+    phi_A = np.asarray(simulation_object.get_features(), dtype=float).reshape(-1)
+
+    simulation_object.feed(input_B)
+    phi_B = np.asarray(simulation_object.get_features(), dtype=float).reshape(-1)
+
+    psi = (phi_A - phi_B).reshape(-1)
+
+    history_str = _recent_swimmer_history_for_prompt(max_items=6)
+
+    prompt = f"""
+You are labeling pairwise preferences between two swimmer trajectories.
+
+Prefer trajectories that:
+- make more forward progress,
+- avoid unnecessary vertical drift,
+- use less wasted motion / total displacement.
+
+Previous comparisons (context):
+{history_str}
+
+Now evaluate:
+
+Trajectory A:
+{describe_swimmer_features(phi_A)}
+
+Trajectory B:
+{describe_swimmer_features(phi_B)}
+
+Answer with exactly ONE token:
+1  (prefer A)
+2  (prefer B)
+0  (tie / no preference)
+"""
+
+    try:
+        raw = call_ollama_mistral(prompt)
+        s = parse_preference(raw)
+    except Exception as e:
+        print(f"[WARN] LLM call failed ({type(e).__name__}): {e} -> returning tie")
+        s = 0
+
+    if isinstance(simulation_object, Swimmer) and not SWIMMER_BASELINE_HISTORY:
+        _log_swimmer_choice(phi_A=phi_A, phi_B=phi_B, s=s, source="llm")
+
+    return np.asarray(psi, dtype=float), int(s)
+
+
 
 
 # -----------------------------
@@ -181,6 +457,61 @@ def parse_preference(text: str) -> int:
     return 0
 
 
+
+
+def llm_preference_for_tosser(simulation_object, input_A, input_B):
+    simulation_object.feed(input_A)
+    phi_A = np.asarray(simulation_object.get_features(), dtype=float).reshape(-1)
+
+    simulation_object.feed(input_B)
+    phi_B = np.asarray(simulation_object.get_features(), dtype=float).reshape(-1)
+
+    psi = (phi_A - phi_B).reshape(-1)
+
+    history_str = _recent_tosser_history_for_prompt(max_items=6)
+
+    prompt = f"""
+You are labeling pairwise preferences between two tossing trajectories.
+Prefer trajectories that:
+- throw farther (higher range),
+- go higher (higher altitude),
+- flip more (higher flips),
+- land closer to a basket (higher basket proximity score).
+
+Previous comparisons (context):
+{history_str}
+
+Now evaluate:
+
+Trajectory A:
+{describe_tosser_features(phi_A)}
+
+Trajectory B:
+{describe_tosser_features(phi_B)}
+
+Answer with exactly ONE token:
+1  (prefer A)
+2  (prefer B)
+0  (tie / no preference)
+"""
+
+    try:
+        raw = call_ollama_mistral(prompt)
+        s = parse_preference(raw)
+    except Exception as e:
+        print(f"[WARN] LLM call failed ({type(e).__name__}): {e} -> returning tie")
+        s = 0
+
+    # mirror driver behavior: log only until baseline exists
+    if isinstance(simulation_object, Tosser) and not TOSSER_BASELINE_HISTORY:
+        _log_tosser_choice(phi_A=phi_A, phi_B=phi_B, s=s, source="llm")
+
+    return np.asarray(psi, dtype=float), int(s)
+
+
+
+
+
 def llm_preference_for_driver(simulation_object, input_A, input_B):
     """
     Returns: (psi, s)
@@ -195,15 +526,18 @@ def llm_preference_for_driver(simulation_object, input_A, input_B):
 
     history_str = _recent_feature_history_for_prompt(max_items=6)
 
+    active_extra = getattr(simulation_object, "extra_feature_id", "none")
+
     prompt = f"""
-You are labeling pairwise preferences between two driving trajectories and your goal is mimic that of a safe human.
+You are labeling pairwise preferences between two driving trajectories and your goal is to mimic that of a safe human.
 
-   The driver has four features:
-    1. Staying in lane (higher is better).
-    2. Speed deviation from the desired speed (lower is better).
-    3. Heading straightness (higher is better).
-    4. Collision risk (lower is better).
+The driver always has these fixed features:
+1. Staying in lane (higher is better).
+2. Heading straightness (higher is better).
+3. Collision avoidance cost (lower is better).
 
+Current active extra feature: {active_extra}
+If the feature vector has a 4th value, that last value is the currently active extra feature.
 
 Previous comparisons (context):
 {history_str}
@@ -292,6 +626,11 @@ def get_feedback_mixed(
             # (This becomes the running context used in "Previous comparisons")
             if isinstance(simulation_object, Driver):
                 _log_driver_choice(phi_A=phi_A, phi_B=phi_B, s=s, source="oracle")
+            elif isinstance(simulation_object, Tosser):
+                _log_tosser_choice(phi_A=phi_A, phi_B=phi_B, s=s, source="oracle")
+            elif isinstance(simulation_object, Swimmer):
+                _log_swimmer_choice(phi_A=phi_A, phi_B=phi_B, s=s, source="oracle")
+
 
         else:
             psi, s = _human_feedback_psi(simulation_object, input_A, input_B)
@@ -302,16 +641,27 @@ def get_feedback_mixed(
             tracker.record_query_source(source)
         return np.asarray(psi, dtype=float), int(s), source
 
-    # Pure LLM path (what you want after baseline)
+
     if routing_mode == "topk":
-        psi, s = llm_preference_for_driver(simulation_object, input_A, input_B)
+        if isinstance(simulation_object, Tosser) or task == "tosser":
+            psi, s = llm_preference_for_tosser(simulation_object, input_A, input_B)
+        elif isinstance(simulation_object, Swimmer) or task == "swimmer":
+            psi, s = llm_preference_for_swimmer(simulation_object, input_A, input_B)
+        else:
+            psi, s = llm_preference_for_driver(simulation_object, input_A, input_B)
+
         if tracker:
             tracker.record_query_source("llm")
         print(f"[INFO] Driver query {query_index + 1}/{batch_size}: TOPK MODE -> LLM")
         return np.asarray(psi, dtype=float), int(s), "llm"
 
-    # If you ever use entropy routing again, you can re-add it here.
-    psi, s = llm_preference_for_driver(simulation_object, input_A, input_B)
+    if isinstance(simulation_object, Tosser) or task == "tosser":
+        psi, s = llm_preference_for_tosser(simulation_object, input_A, input_B)
+    elif isinstance(simulation_object, Swimmer) or task == "swimmer":
+        psi, s = llm_preference_for_swimmer(simulation_object, input_A, input_B)
+    else:
+        psi, s = llm_preference_for_driver(simulation_object, input_A, input_B)
+
     if tracker:
         tracker.record_query_source("llm")
     return np.asarray(psi, dtype=float), int(s), "llm"

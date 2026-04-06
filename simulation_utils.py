@@ -1,13 +1,7 @@
-import numpy as np
 import scipy.optimize as opt
 import algos
-from models import Driver, LunarLander, MountainCar, Swimmer, Tosser
-
-
-# from models import Driver
-# d = Driver()
-# d.set_extra_feature("progress")
-
+from models import Driver, LunarLander, MountainCar, Swimmer, Tosser, Fetch
+import numpy as np
 
 
 def get_feedback(simulation_object, input_A, input_B):
@@ -37,41 +31,53 @@ def get_feedback(simulation_object, input_A, input_B):
     return psi, s
 
 
+def refresh_driver_w_true(env: Driver):
+    base = np.array([0.35, 0.30, -0.70], dtype=float)
+    if getattr(env, 'extra_feature_id', 'none') == 'none':
+        w_true = base
+    else:
+        appended = env.hidden_extra_weight if env.extra_feature_id == env.hidden_extra_feature_id else 0.0
+        w_true = np.append(base, appended)
+    norm = np.linalg.norm(w_true)
+    if norm > 0:
+        w_true = w_true / norm
+    env.w_true = w_true
+    return env
+
 
 def create_env(task):
     if task == 'driver':
         env = Driver()
-        # Feature order:
-        # 0: staying in lane
-        # 1: keeping speed
-        # 2: heading
-        # 3: collision avoidance
-
-        w_true = np.array([
-            0.35,  # staying in lane (moderately important)
-            0.10,  # keeping speed (mild importance)
-            0.30,  # heading (moderate)
-            -0.70,  # collision avoidance (very strong penalty)
-        ], dtype=float)
-
-        # normalize like in the paper
-        w_true /= np.linalg.norm(w_true)
-
-        env.w_true = w_true
-        return env
-
+        env.set_extra_feature('none')
+        refresh_driver_w_true(env)
         return env
     elif task == 'lunarlander':
         return LunarLander()
     elif task == 'mountaincar':
-        return MountainCar()
+        env = MountainCar()
+        w_true = np.array([0.85, 0.15, -0.45], dtype=float)
+        w_true /= np.linalg.norm(w_true)
+        env.w_true = w_true
+        return env
     elif task == 'swimmer':
-        return Swimmer()
+        env = Swimmer()
+        w_true = np.array([0.90, 0.05, -0.35], dtype=float)
+        w_true /= np.linalg.norm(w_true)
+        env.w_true = w_true
+        return env
+    elif task == 'fetch':
+        env = Fetch()
+        env.w_true = np.array([-0.40, -0.35, -0.10, -0.15], dtype=float)
+        return env
     elif task == 'tosser':
-        return Tosser()
-    else:
-        print('There is no task called ' + task)
-        exit(0)
+        env = Tosser()
+        def _normalize(w):
+            w = np.asarray(w, dtype=float)
+            n = np.linalg.norm(w)
+            return w if n == 0 else w / n
+        env.w_true = _normalize([0.4, 0.05, 0.0, 0.8])
+        env.preference_label = "green_strong"
+        return env
 
 
 def run_algo(method, simulation_object, w_samples, b=10, B=200):
@@ -100,6 +106,7 @@ def func(ctrl_array, *args):
     simulation_object.set_ctrl(ctrl_array)
     features = simulation_object.get_features()
     return -np.mean(np.array(features).dot(w))
+
 
 def perform_best(simulation_object, w, iter_count=10):
     u = simulation_object.ctrl_size

@@ -4,6 +4,39 @@ from sklearn.metrics.pairwise import pairwise_distances
 import kmedoids
 from scipy.spatial import ConvexHull
 import dpp_sampler
+import os
+import subprocess
+import sys
+
+def _ctrl_sample_path(simulation_object):
+    if getattr(simulation_object, "name", "") == "driver":
+        feature_id = getattr(simulation_object, "extra_feature_id", "none")
+        return os.path.join("ctrl_samples", f"{simulation_object.name}_{feature_id}.npz")
+    return os.path.join("ctrl_samples", f"{simulation_object.name}.npz")
+
+
+def _ensure_ctrl_samples(simulation_object, K=4000):
+    path = _ctrl_sample_path(simulation_object)
+    if os.path.exists(path):
+        return path
+
+    os.makedirs("ctrl_samples", exist_ok=True)
+
+    task = simulation_object.name.lower()
+    if task == "driver":
+        feature_id = getattr(simulation_object, "extra_feature_id", "none")
+        cmd = [sys.executable, "input_sampler_2.py", task, str(K), feature_id]
+    else:
+        cmd = [sys.executable, "input_sampler_2.py", task, str(K)]
+
+    print(f"[ctrl_samples] generating missing cache: {path}")
+    subprocess.run(cmd, check=True)
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Expected ctrl sample file was not created: {path}")
+
+    return path
+
 def func_psi(psi_set, w_samples):
     y = psi_set.dot(w_samples.T)
     term1 = np.sum(1.-np.exp(-np.maximum(y,0)),axis=1)
@@ -41,9 +74,19 @@ def func(inputs_set, *args):
 
 def nonbatch(simulation_object, w_samples):
     z = simulation_object.feed_size
-    lower_input_bound = [x[0] for x in simulation_object.feed_bounds]
-    upper_input_bound = [x[1] for x in simulation_object.feed_bounds]
-    opt_res = opt.fmin_l_bfgs_b(func, x0=np.random.uniform(low=2*lower_input_bound, high=2*upper_input_bound, size=(2*z)), args=(simulation_object, w_samples), bounds=simulation_object.feed_bounds*2, approx_grad=True)
+    lower_input_bound = np.array([x[0] for x in simulation_object.feed_bounds], dtype=float)
+    upper_input_bound = np.array([x[1] for x in simulation_object.feed_bounds], dtype=float)
+
+    pair_low = np.concatenate([lower_input_bound, lower_input_bound])
+    pair_high = np.concatenate([upper_input_bound, upper_input_bound])
+
+    opt_res = opt.fmin_l_bfgs_b(
+        func,
+        x0=np.random.uniform(low=pair_low, high=pair_high, size=(2 * z)),
+        args=(simulation_object, w_samples),
+        bounds=simulation_object.feed_bounds * 2,
+        approx_grad=True,
+    )
     return opt_res[0][0:z], opt_res[0][z:2*z]
 
 
@@ -54,7 +97,8 @@ def select_top_candidates(simulation_object, w_samples, B):
     inputs_set = np.zeros(shape=(0,2*z))
     psi_set = np.zeros(shape=(0,d))
     f_values = np.zeros(shape=(0))
-    data = np.load('ctrl_samples/' + simulation_object.name + '.npz')
+    path = _ensure_ctrl_samples(simulation_object)
+    data = np.load(path)
     inputs_set = data['inputs_set']
     psi_set = data['psi_set']
     f_values = func_psi(psi_set, w_samples)
@@ -117,8 +161,12 @@ def dpp(simulation_object, w_samples, b, B=200, gamma=1):
     return inputs_set[ids,:z], inputs_set[ids,z:]
 
 def random(simulation_object, w_samples):
-    lower_input_bound = [x[0] for x in simulation_object.feed_bounds]
-    upper_input_bound = [x[1] for x in simulation_object.feed_bounds]
-    input_A = np.random.uniform(low=2*lower_input_bound, high=2*upper_input_bound, size=(2*simulation_object.feed_size))
-    input_B = np.random.uniform(low=2*lower_input_bound, high=2*upper_input_bound, size=(2*simulation_object.feed_size))
+    lower_input_bound = np.array([x[0] for x in simulation_object.feed_bounds], dtype=float)
+    upper_input_bound = np.array([x[1] for x in simulation_object.feed_bounds], dtype=float)
+
+    pair_low = np.concatenate([lower_input_bound, lower_input_bound])
+    pair_high = np.concatenate([upper_input_bound, upper_input_bound])
+
+    input_A = np.random.uniform(low=pair_low, high=pair_high, size=(2 * simulation_object.feed_size))
+    input_B = np.random.uniform(low=pair_low, high=pair_high, size=(2 * simulation_object.feed_size))
     return input_A, input_B

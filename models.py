@@ -1,6 +1,4 @@
-from simulator import DrivingSimulation, GymSimulation, MujocoSimulation
-import numpy as np
-from simulator import DrivingSimulation, GymSimulation, MujocoSimulation
+from simulator import DrivingSimulation, GymSimulation, MujocoSimulation, FetchSimulation
 import numpy as np
 from driver_extra_feature import (
     compute_extra_feature,
@@ -23,47 +21,31 @@ class Driver(DrivingSimulation):
         self.state_bounds = []
         self.feed_bounds = self.state_bounds + self.ctrl_bounds
 
-        # base feature count (the original 4)
-        self.num_base_features = 4
-
-        # start with only the base features
+        self.num_base_features = 3
         self.extra_feature_id = "none"
-        self.num_of_features = self.num_base_features  # 4 or 5 depending on extra
+        self.num_of_features = self.num_base_features
 
-    # ----------- extra feature wiring -----------
+        self.hidden_extra_feature_id = "keeping_speed"
+        self.hidden_extra_weight = 0.10
 
     def set_extra_feature(self, extra_feature_id: str):
-        """
-        Decide whether to add a 5th feature.
-
-        IMPORTANT: call this BEFORE you start a run (before invoking demos.batch
-        or demos.nonbatch), so that the feature dimension is fixed for the whole run.
-
-        extra_feature_id must be one of EXTRA_FEATURE_BANK keys.
-        'none' means: keep 4 features only.
-        """
         if extra_feature_id not in EXTRA_FEATURE_BANK:
             print(f"[WARN] Unknown extra feature id '{extra_feature_id}', using 'none'.")
             extra_feature_id = "none"
 
         self.extra_feature_id = extra_feature_id
-
         if self.extra_feature_id == "none":
             self.num_of_features = self.num_base_features
         else:
             self.num_of_features = self.num_base_features + 1
 
-    # ----------- feature computation -----------
-
     def get_features(self):
         recording = self.get_recording(all_info=False)
         recording = np.array(recording)
 
-        # staying in lane (higher is better)
         staying_in_lane = np.mean(
             np.exp(
-                -30
-                * np.min(
+                -30 * np.min(
                     [
                         np.square(recording[:, 0, 0] - 0.17),
                         np.square(recording[:, 0, 0]),
@@ -74,13 +56,8 @@ class Driver(DrivingSimulation):
             )
         )
 
-        # keeping speed (lower is better)
-        keeping_speed = np.mean(np.square(recording[:, 0, 3] - 1))
-
-        # heading (higher is better)
         heading = np.mean(np.sin(recording[:, 0, 2]))
 
-        # collision avoidance (lower is better)
         collision_avoidance = np.mean(
             np.exp(
                 -(
@@ -92,15 +69,12 @@ class Driver(DrivingSimulation):
 
         feats = [
             staying_in_lane,
-            keeping_speed,
             heading,
             collision_avoidance,
         ]
 
-        # optional 5th feature from the bank
         if self.extra_feature_id != "none":
-            extra_val = compute_extra_feature(recording, self.extra_feature_id)
-            feats.append(extra_val)
+            feats.append(compute_extra_feature(recording, self.extra_feature_id))
 
         return feats
 
@@ -128,42 +102,63 @@ class Driver(DrivingSimulation):
         ctrl_value = value[:]
         self.set_ctrl(ctrl_value)
 
+
+class LunarLander(GymSimulation):
+    def __init__(self, total_time=200, recording_time=[0,200]):
+        super(LunarLander ,self).__init__(name='LunarLanderContinuous-v2', total_time=total_time, recording_time=recording_time)
+        self.frame_delay_ms = 20
+        self.ctrl_size = 10
+        self.state_size = 4
+        self.feed_size = self.ctrl_size + self.state_size
+        eps = np.finfo(np.float32).eps
+        self.ctrl_bounds = [(-1+eps,1-eps)]*self.ctrl_size
+        self.state_bounds = [(-0.05, 0.05),(-0.5,0.5),(-4,4),(-4,4)]
+        self.feed_bounds = self.state_bounds + self.ctrl_bounds
+        self.num_of_features = 6
+        self.reset()
+
     def get_features(self):
-        recording = self.get_recording(all_info=False)
+        recording = self.get_recording()
         recording = np.array(recording)
 
-        # staying in lane (higher is better)
-        staying_in_lane = np.mean(np.exp(-30*np.min([np.square(recording[:,0,0]-0.17), np.square(recording[:,0,0]), np.square(recording[:,0,0]+0.17)], axis=0)))
+        # mean angle relative to the vertical axis
+        mean_angle = np.mean(np.arccos(np.cos(recording[:,0])))
 
-        # keeping speed (lower is better)
-        keeping_speed = np.mean(np.square(recording[:,0,3]-1))
+        # final distance to landing pad
+        final_dist = np.exp(-0.33*np.linalg.norm([recording[len(recording)-1,4]-10, recording[len(recording)-1,5]-3.9]))
 
-        # heading (higher is better)
-        heading = np.mean(np.sin(recording[:,0,2]))
+        # absolute value of total (vectorel) rotation
+        total_rotation = np.abs(recording[len(recording)-1,0] - recording[0,0])/(2*np.pi)
 
-        # collision avoidance (lower is better)
-        collision_avoidance = np.mean(np.exp(-(7*np.square(recording[:,0,0]-recording[:,1,0])+3*np.square(recording[:,0,1]-recording[:,1,1]))))
+        # path length
+        path_length = np.sum([np.linalg.norm([recording[i,4]-recording[i-1,4], recording[i,5]-recording[i-1,5]]) for i in range(1,len(recording))])/15
 
-        feats = [
-            staying_in_lane,
-            keeping_speed,
-            heading,
-            collision_avoidance,
-        ]
+        # final vertical velocity
+        final_vertical_velocity = np.mean(recording[len(recording)-5:,3])/15
 
-        # --- optional 5th feature ---
-        if self.extra_feature_id != "none":
-            extra_val = compute_extra_feature(recording, self.extra_feature_id)
-            feats.append(extra_val)
+        # crash time (normalized by total time)
+        crash_time = len(recording)/self.total_time
 
-        return feats
+        return [mean_angle, final_dist, total_rotation, path_length, final_vertical_velocity, crash_time]
+
     @property
     def state(self):
-        return [self.robot.x, self.human.x]
+        l = self.sim.unwrapped.lander
+        res = [l.angle, l.angularVelocity]
+        res = np.append(res, list(l.linearVelocity))
+        res = np.append(res, list(l.position))
+        return np.append(res, self.done)
     @state.setter
     def state(self, value):
-        self.reset()
-        self.initial_state = value.copy()
+        self.reset_seed()
+        self.sim.reset()
+        self.done = False
+        if value is None:
+            value = self.initial_state if self.initial_state is not None else [0]*4
+        self.sim.unwrapped.lander.angle = value[0]
+        self.sim.unwrapped.lander.angularVelocity = value[1]
+        self.sim.unwrapped.lander.linearVelocity[0] = value[2]
+        self.sim.unwrapped.lander.linearVelocity[1] = value[3]
 
     def set_ctrl(self, value):
         arr = [[0]*self.input_size]*self.total_time
@@ -177,7 +172,9 @@ class Driver(DrivingSimulation):
         self.ctrl = list(arr)
 
     def feed(self, value):
-        ctrl_value = value[:]
+        initial_state = value[0:self.state_size]
+        ctrl_value = value[self.state_size:self.feed_size]
+        self.initial_state = initial_state
         self.set_ctrl(ctrl_value)
 
 
@@ -420,4 +417,50 @@ class Tosser(MujocoSimulation):
         initial_state = value[0:self.state_size]
         ctrl_value = value[self.state_size:self.feed_size]
         self.initial_state.qpos[:] = initial_state
+        self.set_ctrl(ctrl_value)
+
+
+
+class Fetch(FetchSimulation):
+    def __init__(self, total_time=152, recording_time=[0,152]):
+        super(Fetch ,self).__init__(total_time=total_time, recording_time=recording_time)
+        self.ctrl_size = 3*19
+        self.state_size = 0
+        self.feed_size = self.ctrl_size + self.state_size
+        self.ctrl_bounds = [(-1,1)]*self.ctrl_size
+        self.state_bounds = [(-np.pi/2,np.pi/2)]*self.state_size
+        self.feed_bounds = self.state_bounds + self.ctrl_bounds
+        self.num_of_features = 4
+
+    def get_features(self):
+        recording = self.get_recording(all_info=False)
+        recording = np.array(recording)
+        f1 = np.mean(recording[-1,:]) / 1.71217351
+        f2 = np.mean(recording[-1,:]) / 1.8090672
+        f3 = np.mean(recording[-1,:]) / 2.40721058
+        f4 = np.mean(recording[-1,:]) / 0.2506069
+        return [f1, f2, f3, f4]
+
+    @property
+    def state(self):
+        return self.sim.sim.get_state()
+    @state.setter
+    def state(self, value):
+        self.sim.sim.set_state(value)
+
+    def set_ctrl(self, value):
+        arr = [[0]*self.input_size]*self.total_time
+        interval_count = len(value)//self.input_size
+        interval_time = int(self.total_time / interval_count)
+        arr = np.array(arr).astype(float)
+        j = 0
+        for i in range(interval_count):
+            arr[i*interval_time:(i+1)*interval_time] = [value[j+i] for i in range(3)]
+            j += 3
+        self.ctrl = list(arr)
+
+    def feed(self, value):
+        initial_state = value[:self.state_size]
+        ctrl_value = value[self.state_size:self.feed_size]
+        self.sim.reset()
         self.set_ctrl(ctrl_value)
