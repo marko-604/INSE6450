@@ -1,0 +1,97 @@
+{
+  "task": "driver",
+  "method": "dpp",
+  "human_topk": 5,
+  "pure_oracle": false,
+  "num_oracle": 50,
+  "num_llm": 0,
+  "history": [
+    {
+      "iteration": 1,
+      "num_queries": 0,
+      "oracle_queries": 0,
+      "elapsed_sec": 4.7263147830963135,
+      "alignment": 0.5484907406470627
+    },
+    {
+      "iteration": 2,
+      "num_queries": 5,
+      "oracle_queries": 5,
+      "elapsed_sec": 26.49850058555603,
+      "alignment": 0.5181116927152933,
+      "avg_log_likelihood": -0.5589725461969032
+    },
+    {
+      "iteration": 3,
+      "num_queries": 10,
+      "oracle_queries": 10,
+      "elapsed_sec": 69.03976440429688,
+      "alignment": 0.6784229436353476,
+      "avg_log_likelihood": -0.5282317949143154
+    },
+    {
+      "iteration": 4,
+      "num_queries": 15,
+      "oracle_queries": 15,
+      "elapsed_sec": 98.22211933135986,
+      "alignment": 0.6266394800389854,
+      "avg_log_likelihood": -0.44388543152615545
+    },
+    {
+      "iteration": 5,
+      "num_queries": 20,
+      "oracle_queries": 20,
+      "elapsed_sec": 121.55555725097656,
+      "alignment": 0.8500459958356925,
+      "avg_log_likelihood": -0.5397934207946755
+    },
+    {
+      "iteration": 6,
+      "num_queries": 25,
+      "oracle_queries": 25,
+      "elapsed_sec": 176.20192790031433,
+      "alignment": 0.9648281609168193,
+      "avg_log_likelihood": -0.5909655767318404
+    },
+    {
+      "iteration": 7,
+      "num_queries": 30,
+      "oracle_queries": 30,
+      "elapsed_sec": 204.81099152565002,
+      "alignment": 0.9878160997063062,
+      "avg_log_likelihood": -0.602982358968108
+    },
+    {
+      "iteration": 8,
+      "num_queries": 35,
+      "oracle_queries": 35,
+      "elapsed_sec": 234.49393844604492,
+      "alignment": 0.9634339332742108,
+      "avg_log_likelihood": -0.6140425812419861
+    },
+    {
+      "iteration": 9,
+      "num_queries": 40,
+      "oracle_queries": 40,
+      "elapsed_sec": 256.2124533653259,
+      "alignment": 0.9865019764026014,
+      "avg_log_likelihood": -0.6143597536557631
+    },
+    {
+      "iteration": 10,
+      "num_queries": 45,
+      "oracle_queries": 45,
+      "elapsed_sec": 279.43546056747437,
+      "alignment": 0.9881450079057266,
+      "avg_log_likelihood": -0.6422952732508199
+    },
+    {
+      "iteration": 11,
+      "num_queries": 50,
+      "oracle_queries": 50,
+      "elapsed_sec": 318.64457392692566,
+      "alignment": 0.9968900851028052,
+      "avg_log_likelihood": -0.6424700291100433
+    }
+  ]
+}
